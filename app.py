@@ -9,6 +9,8 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     ConversationHandler,
+    MessageHandler,
+    filters
 )
 
 # Enable logging
@@ -16,14 +18,14 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 # set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 
 # Stages
-START_ROUTES, END_ROUTES = range(2)
+DICT_CHOICES_STAGE, BANK_STAGE, MCC_STAGE, END_STAGE = range(4)
 # Callback data
-ONE, TWO, THREE, FOUR = range(4)
+DICT_CHOICES, BANK_CHOICES, MCC_CHOICES, BY_BIK, BY_MCC, READ_BIC, READ_MCC, END = range(8)
 
 TOKEN = os.environ.get('BANKS_LIST_TOKEN', 'Not Set')
 print(TOKEN)
@@ -41,16 +43,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # a list (hence `[[...]]`).
     keyboard = [
         [
-            InlineKeyboardButton("Инфо по банкам", callback_data=str(ONE)),
-            InlineKeyboardButton("MCC", callback_data=str(TWO)),
+            InlineKeyboardButton("Инфо по банкам", callback_data=str(BANK_CHOICES)),
+            InlineKeyboardButton("MCC", callback_data=str(MCC_CHOICES)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     # Send message with text and appended InlineKeyboard
-    await update.message.reply_text("Выбери, что нужно", reply_markup=reply_markup)
+    await update.message.reply_text("Сервис, который позволяет получать информацию по разным справочникам. \nВыбери, что нужно", reply_markup=reply_markup)
     # Tell ConversationHandler that we're in state `FIRST` now
-    return START_ROUTES
-
+    return DICT_CHOICES_STAGE
 
 async def start_over(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Prompt same text & keyboard as `start` does but not as new message"""
@@ -61,85 +62,129 @@ async def start_over(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Инфо по банкам", callback_data=str(ONE)),
-            InlineKeyboardButton("MCC", callback_data=str(TWO)),
+            InlineKeyboardButton("Инфо по банкам", callback_data=str(BANK_CHOICES)),
+            InlineKeyboardButton("MCC", callback_data=str(MCC_CHOICES)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     # Instead of sending a new message, edit the message that
     # originated the CallbackQuery. This gives the feeling of an
     # interactive menu.
-    await query.edit_message_text(text="Выбери, что нужно", reply_markup=reply_markup)
-    return START_ROUTES
+    await query.edit_message_text(text="Сервис, который позволяет получать информацию по разным справочникам. \nВыбери, что нужно", reply_markup=reply_markup)
+    return DICT_CHOICES_STAGE
 
 
-async def one(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show new choice of buttons"""
+async def dict_choices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt same text & keyboard as `start` does but not as new message"""
+    # Get CallbackQuery from Update
+    query = update.callback_query
+    # CallbackQueries need to be answered, even if no notification to the user is needed
+    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+    await query.answer()
+    keyboard = [
+        [
+            InlineKeyboardButton("Инфо по банкам", callback_data=str(BANK_CHOICES)),
+            InlineKeyboardButton("MCC", callback_data=str(MCC_CHOICES)),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text="Выбери, по какому справочнику искать", reply_markup=reply_markup)
+    return DICT_CHOICES_STAGE
+
+
+async def bank_choices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Поиск по БИКу", callback_data=str(THREE)),
-            InlineKeyboardButton("Поиск по Наименованию", callback_data=str(FOUR)),
+            InlineKeyboardButton("Поиск по БИКу банка", callback_data=str(BY_BIK)),
+            #InlineKeyboardButton("Поиск по наименованию банка", callback_data=str(BY_BANK_NAME)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text="First CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="Выбери критерий, по которому будешь искать банк", reply_markup=reply_markup
     )
-    return START_ROUTES
+    return BANK_STAGE
 
 
-async def two(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show new choice of buttons"""
+async def mcc_choices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("1", callback_data=str(ONE)),
-            InlineKeyboardButton("3", callback_data=str(THREE)),
+            InlineKeyboardButton("Поиск по MCC", callback_data=str(BY_MCC)),
+            #InlineKeyboardButton("Поиск по наименованию MCC", callback_data=str(BY_MCC_NAME)),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text="Second CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="Выбери критерий, по которому будешь искать MCC", reply_markup=reply_markup
     )
-    return START_ROUTES
+    return MCC_STAGE
 
 
-async def three(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show new choice of buttons. This is the end point of the conversation."""
+async def by_bik(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("Yes, let's do it again!", callback_data=str(ONE)),
-            InlineKeyboardButton("Nah, I've had enough ...", callback_data=str(TWO)),
-        ]
+            InlineKeyboardButton("Хочу искать банки по другому критерию", callback_data=str(BANK_CHOICES)),
+        ],
+        [
+            InlineKeyboardButton("Главное меню", callback_data=str(DICT_CHOICES)),
+         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text="Third CallbackQueryHandler. Do want to start over?", reply_markup=reply_markup
+        text="Вводи БИК банка", reply_markup=reply_markup
     )
+    return BANK_STAGE
+
+async def read_bik(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    bik = update.message.text
+    print(f"{bik=}")
+    keyboard = [
+        [
+            InlineKeyboardButton("Главное меню", callback_data=str(DICT_CHOICES)),
+         ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    #data = db.select(f"select * from public.banks where bic = {bik}")
+    #await context.bot.send_message(chat_id=update.effective_chat.id, text=update.message.text)
+    await update.message.reply_text(f"Данные по БИКу {bik}", reply_markup=reply_markup)
     # Transfer to conversation state `SECOND`
-    return END_ROUTES
+    return END_STAGE
 
-
-async def four(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show new choice of buttons"""
+async def by_mcc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("2", callback_data=str(TWO)),
-            InlineKeyboardButton("3", callback_data=str(THREE)),
-        ]
+            InlineKeyboardButton("Хочу искать MCC по другому критерию", callback_data=str(MCC_CHOICES)),
+        ],
+        [
+            InlineKeyboardButton("Главное меню", callback_data=str(DICT_CHOICES)),
+         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text="Fourth CallbackQueryHandler, Choose a route", reply_markup=reply_markup
+        text="Вводи MCC", reply_markup=reply_markup
     )
-    return START_ROUTES
+    return MCC_STAGE
+
+async def read_mcc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    mcc = update.message.text
+    print(f"{mcc=}")
+    keyboard = [
+        [
+            InlineKeyboardButton("Главное меню", callback_data=str(DICT_CHOICES)),
+         ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    #data = db.select(f"select * from public.banks where bic = {bik}")
+    await update.message.reply_text(f"Данные по MCC {mcc}", reply_markup=reply_markup)
+    return END_STAGE
 
 
 async def end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -166,15 +211,21 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            START_ROUTES: [
-                CallbackQueryHandler(one, pattern="^" + str(ONE) + "$"),
-                CallbackQueryHandler(two, pattern="^" + str(TWO) + "$"),
-                CallbackQueryHandler(three, pattern="^" + str(THREE) + "$"),
-                CallbackQueryHandler(four, pattern="^" + str(FOUR) + "$"),
+            DICT_CHOICES_STAGE: [
+                CallbackQueryHandler(bank_choices, pattern="^" + str(BANK_CHOICES) + "$"),
+                CallbackQueryHandler(mcc_choices, pattern="^" + str(MCC_CHOICES) + "$"),
             ],
-            END_ROUTES: [
-                CallbackQueryHandler(start_over, pattern="^" + str(ONE) + "$"),
-                CallbackQueryHandler(end, pattern="^" + str(TWO) + "$"),
+            BANK_STAGE: [
+                CallbackQueryHandler(by_bik, pattern="^" + str(BY_BIK) + "$"),
+                MessageHandler(filters=filters.TEXT & ~filters.COMMAND, callback=read_bik),
+            ],
+            MCC_STAGE: [
+                CallbackQueryHandler(by_mcc, pattern="^" + str(BY_MCC) + "$"),  
+                MessageHandler(filters=filters.TEXT & ~filters.COMMAND, callback=read_mcc),
+            ],
+            END_STAGE: [
+                CallbackQueryHandler(start_over, pattern="^" + str(DICT_CHOICES) + "$"),
+                CallbackQueryHandler(end, pattern="^" + str(END) + "$"),
             ],
         },
         fallbacks=[CommandHandler("start", start)],
@@ -182,6 +233,7 @@ def main() -> None:
 
     # Add ConversationHandler to application that will be used for handling updates
     application.add_handler(conv_handler)
+#    application.add_handler(bik_handler)
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
