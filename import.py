@@ -15,14 +15,15 @@ def banks() -> pl.DataFrame:
 
 
 def mcc() -> pl.DataFrame:
-    df = pd.read_excel("downloads/mcc.xlsx")
-    df.columns = ["code", "descr"]
-    return pl.from_pandas(df)
+    df = pd.read_excel("downloads/mcc_codes.xlsx")
+    df.columns = ["code", "descr", "full_descr"]
+    df = pl.from_pandas(df).select(pl.col("code").cast(pl.Int32), pl.col("descr"))
+    return df
 
 
 db = DB()
 
 banks_df = banks()
 mcc_df = mcc()
-db.insert(table="mcc", df=banks_df)
+db.insert(table="banks", df=banks_df)
 db.insert(table="mcc", df=mcc_df)
